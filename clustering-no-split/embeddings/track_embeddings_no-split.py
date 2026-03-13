@@ -49,11 +49,25 @@ def compute_track_embeddings(model, playlist_tracks):
     track_embeddings = {track_title: emb for track_title, emb in zip(unique_tracks, track_embeddings_array)}
     return track_embeddings
 
+'''
 def compute_playlist_embeddings(playlist_tracks, track_embeddings):
     playlist_embeddings = {}
     for pid, tracks in tqdm(playlist_tracks.items(), desc="Processing playlists", unit="playlist"):
         final_embedding = np.mean(track_embeddings[tracks], axis=0)
         playlist_embeddings[pid] = final_embedding
+    return playlist_embeddings
+'''
+
+def compute_playlist_embeddings(playlist_tracks, track_embeddings):
+    playlist_embeddings = {}
+    for pid, tracks in tqdm(playlist_tracks.items(), desc="Processing playlists", unit="playlist"):
+        embeddings = []
+        for track in tracks:
+            if track in track_embeddings:
+                embeddings.append(track_embeddings[track])
+        if len(embeddings) > 0:
+            final_embedding = np.mean(embeddings, axis=0)
+            playlist_embeddings[pid] = final_embedding
     return playlist_embeddings
 
 def main():
