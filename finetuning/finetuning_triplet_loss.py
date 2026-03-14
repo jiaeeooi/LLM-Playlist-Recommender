@@ -9,9 +9,9 @@ from tqdm.auto import tqdm
 
 # Parameters
 MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
-train_csv = '/home/vellard/playlist_continuation/clusters_train.csv'
-val_csv = '/home/vellard/playlist_continuation/clusters_val.csv'
-output_dir = './final_triplet_model'
+train_csv = '/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_train.csv'
+val_csv   = '/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_val.csv'
+output_dir = '/content/drive/MyDrive/playlist_project/models/triplet_model'
 batch_size = 8
 epochs = 50
 learning_rate = 2e-5
