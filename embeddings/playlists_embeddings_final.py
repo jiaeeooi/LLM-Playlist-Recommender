@@ -74,6 +74,7 @@ def main():
     output_file = '/content/drive/MyDrive/playlist_project/embeddings/playlists_embeddings_cross_entropy.pkl'
     # Choose the  model directory
     finetuned_model_dir = "/content/drive/MyDrive/playlist_project/models/cross_entropy_model"
+    #finetuned_model_dir = "sentence-transformers/all-MiniLM-L6-v2" # pretrained model
 
     tokenizer, model, device = load_fine_tuned_model(finetuned_model_dir)
     print("Loaded fine-tuned classification model (with updated weights).")
