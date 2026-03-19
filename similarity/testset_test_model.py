@@ -72,6 +72,7 @@ def load_playlist_tracks_with_artists(items_csv, tracks_csv):
 
     return playlist_tracks
 
+'''
 # Calculate cosine similarity scores and find the K closest playlists
 def find_similar_playlists_batch(playlist_name, playlist_embeddings, tokenizer, model, top_k=50):
     device = next(model.parameters()).device  # cuda
@@ -90,6 +91,22 @@ def find_similar_playlists_batch(playlist_name, playlist_embeddings, tokenizer, 
     cos_sims_np = cos_sims.cpu().numpy()
     similarities = list(zip(pids, cos_sims_np))
     # Sort and find k highest scores
+    similarities.sort(key=lambda x: x[1], reverse=True)
+
+    return similarities[:top_k]
+'''
+
+# Calculate cosine similarity scores and find the K closest playlists
+def find_similar_playlists_batch(playlist_name, pids, all_embs_torch, tokenizer, model, top_k=50):
+    device = next(model.parameters()).device
+
+    query_emb_np = get_playlist_embedding(playlist_name, tokenizer, model)
+    query_emb_torch = torch.from_numpy(query_emb_np).unsqueeze(0).to(device)
+
+    cos_sims = F.cosine_similarity(query_emb_torch, all_embs_torch, dim=1)
+
+    cos_sims_np = cos_sims.cpu().numpy()
+    similarities = list(zip(pids, cos_sims_np))
     similarities.sort(key=lambda x: x[1], reverse=True)
 
     return similarities[:top_k]
@@ -180,6 +197,13 @@ def main():
     playlist_embeddings = load_playlist_embeddings(playlist_embeddings_file)
     print("Loaded the playlists.")
 
+    device = torch.device("cuda")
+    pids = list(playlist_embeddings.keys())
+    all_embs_np = [playlist_embeddings[pid]["embedding"] for pid in pids]
+    all_embs_np = np.stack(all_embs_np, axis=0)
+    all_embs_torch = torch.from_numpy(all_embs_np).to(device)
+    print("Precomputed embedding matrix.")
+
     playlist_tracks = load_playlist_tracks_with_artists(items_csv, tracks_csv)
     print("Loaded the tracks.")
 
@@ -202,7 +226,8 @@ def main():
 
             top_playlists = find_similar_playlists_batch(
                 playlist_name,
-                playlist_embeddings,
+                pids,
+                all_embs_torch,
                 tokenizer,
                 model,
                 top_k=50
