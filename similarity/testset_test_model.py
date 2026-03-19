@@ -161,15 +161,17 @@ def compute_metrics(recommended_songs, relevant_songs, top_n=10):
 def main():
     
     # Choose the model directory
-    model_dir = "/home/vellard/playlist_continuation/fine_tuned_model_no_scheduler_2"
-    
-    playlist_embeddings_file = "/home/vellard/playlist_continuation/playlists_embeddings/final_embeddings/playlists_embeddings_scheduler.pkl"
-    items_csv = "/data/csvs/items.csv"
-    tracks_csv = "/data/csvs/tracks.csv"
-    playlists_csv = "/data/csvs/playlists.csv"
-    clusters_test_csv = "/home/vellard/playlist_continuation/clusters/clusters_test.csv"
+    model_dir = "/content/drive/MyDrive/playlist_project/models/cross_entropy_model"
+    # model_dir = "sentence-transformers/all-MiniLM-L6-v2" 
+    playlist_embeddings_file = "/content/drive/MyDrive/playlist_project/embeddings/playlists_embeddings_cross_entropy.pkl"
+    # playlist_embeddings_file = "/content/drive/MyDrive/playlist_project/embeddings/playlists_embeddings_pretrained.pkl"
+    items_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/items.csv"
+    tracks_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/tracks.csv"
+    playlists_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/playlists.csv"
+    clusters_test_csv = "/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_test.csv"
 
-    results_csv = "evaluation_results_scheduler.csv"
+    results_csv = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy.csv"
+    #results_csv = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained.csv"
 
     # Load models and playlists
     tokenizer, model = load_fine_tuned_model(model_dir)
