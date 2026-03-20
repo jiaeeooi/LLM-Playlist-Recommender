@@ -88,9 +88,9 @@ def load_playlist_tracks(items_csv, tracks_csv):
 
 
 # =========================
-# METRICS (MATCH ORIGINAL)
+# METRICS
 # =========================
-def compute_metrics(recommended_songs, relevant_songs, top_n=66):
+def compute_metrics(recommended_songs, relevant_songs, top_n):
     G_T = set(relevant_songs)
     G_A = set(a for _, a in relevant_songs)
 
@@ -139,7 +139,9 @@ def main():
     tracks_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/tracks.csv"
     clusters_test_csv = "/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_test.csv"
 
-    output_csv = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy.csv"
+    out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_10.csv"
+    out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_66.csv"
+    out100 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_100.csv"
 
     tokenizer, model = load_model(model_dir)
 
@@ -152,16 +154,13 @@ def main():
         dtype=torch.float32,
         device="cuda"
     )
-
     all_embs = F.normalize(all_embs, dim=1)
 
     # ---------- Load tracks ----------
     playlist_tracks = load_playlist_tracks(items_csv, tracks_csv)
 
     # ---------- Load test data ----------
-    test_names = []
-    test_pids = []
-    cluster_ids = []
+    test_names, test_pids, cluster_ids = [], [], []
 
     with open(clusters_test_csv, 'r', encoding='utf8') as f:
         reader = csv.DictReader(f)
@@ -170,27 +169,22 @@ def main():
             test_pids.append(row["Playlist ID"].strip())
             cluster_ids.append(row["Cluster ID"])
 
-    # ---------- Encode ALL queries ----------
+    # ---------- Encode queries ----------
     query_embs = encode_batch(test_names, tokenizer, model)
     query_embs = F.normalize(query_embs, dim=1)
 
-    # =========================
-    # CHUNKED SIMILARITY (KEY FIX)
-    # =========================
+    # ---------- Chunked similarity ----------
     TOP_K = 50
     QUERY_BATCH = 256
 
-    results = []
+    results_10, results_66, results_100 = [], [], []
 
     for start in tqdm(range(0, query_embs.size(0), QUERY_BATCH), desc="Similarity batches"):
         end = start + QUERY_BATCH
-
         q_batch = query_embs[start:end]
 
         sim = torch.matmul(q_batch, all_embs.T)
-
-        topk_vals, topk_idx = torch.topk(sim, k=TOP_K, dim=1)
-
+        _, topk_idx = torch.topk(sim, k=TOP_K, dim=1)
         topk_idx = topk_idx.cpu()
 
         for i in range(topk_idx.size(0)):
@@ -204,42 +198,48 @@ def main():
                 for track in playlist_tracks.get(str(pid), []):
                     counter[track] += 1
 
-            top_songs = [song for song, _ in counter.most_common(66)]
+            # IMPORTANT: compute top 100 ONCE
+            top_songs = [song for song, _ in counter.most_common(100)]
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
 
-            hit, precision, recall, mrr, r_prec, ndcg = compute_metrics(
-                top_songs, relevant, top_n=66
-            )
+            for k, store in zip(
+                [10, 66, 100],
+                [results_10, results_66, results_100]
+            ):
+                hit, p, r, mrr, rp, ndcg = compute_metrics(top_songs, relevant, k)
 
-            results.append({
-                "Cluster ID": cluster_ids[global_idx],
-                "Playlist ID": test_pids[global_idx],
-                "Playlist Title": test_names[global_idx],
-                "HIT@66": hit,
-                "Precision@66": precision,
-                "Recall@66": recall,
-                "MRR@66": mrr,
-                "R-Precision": r_prec,
-                "NDCG@66": ndcg
-            })
+                store.append({
+                    "Cluster ID": cluster_ids[global_idx],
+                    "Playlist ID": test_pids[global_idx],
+                    "Playlist Title": test_names[global_idx],
+                    f"HIT@{k}": hit,
+                    f"Precision@{k}": p,
+                    f"Recall@{k}": r,
+                    f"MRR@{k}": mrr,
+                    "R-Precision": rp,
+                    f"NDCG@{k}": ndcg
+                })
 
-        # free GPU memory
-        del sim, topk_vals, topk_idx
+        del sim, topk_idx
         torch.cuda.empty_cache()
 
-    # ---------- Save ----------
-    fieldnames = [
-        "Cluster ID", "Playlist ID", "Playlist Title",
-        "HIT@66", "Precision@66", "Recall@66",
-        "MRR@66", "R-Precision", "NDCG@66"
-    ]
+    # ---------- Save function ----------
+    def save_csv(path, results, k):
+        fieldnames = [
+            "Cluster ID", "Playlist ID", "Playlist Title",
+            f"HIT@{k}", f"Precision@{k}", f"Recall@{k}",
+            f"MRR@{k}", "R-Precision", f"NDCG@{k}"
+        ]
+        with open(path, 'w', newline='', encoding='utf8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(results)
 
-    with open(output_csv, 'w', newline='', encoding='utf8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(results)
+    save_csv(out10, results_10, 10)
+    save_csv(out66, results_66, 66)
+    save_csv(out100, results_100, 100)
 
-    print(f"Saved to {output_csv}")
+    print("Saved all 3 CSVs.")
 
 
 if __name__ == "__main__":
