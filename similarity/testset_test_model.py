@@ -198,7 +198,6 @@ def main():
                 for track in playlist_tracks.get(str(pid), []):
                     counter[track] += 1
 
-            # IMPORTANT: compute top 100 ONCE
             top_songs = [song for song, _ in counter.most_common(500)]
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
 
