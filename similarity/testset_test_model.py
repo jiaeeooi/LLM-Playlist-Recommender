@@ -141,7 +141,7 @@ def main():
 
     out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_10.csv"
     out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_66.csv"
-    out100 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_100.csv"
+    out500 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_500.csv"
 
     tokenizer, model = load_model(model_dir)
 
@@ -177,7 +177,7 @@ def main():
     TOP_K = 50
     QUERY_BATCH = 256
 
-    results_10, results_66, results_100 = [], [], []
+    results_10, results_66, results_500 = [], [], []
 
     for start in tqdm(range(0, query_embs.size(0), QUERY_BATCH), desc="Similarity batches"):
         end = start + QUERY_BATCH
@@ -202,8 +202,8 @@ def main():
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
 
             for k, store in zip(
-                [10, 66, 100],
-                [results_10, results_66, results_100]
+                [10, 66, 500],
+                [results_10, results_66, results_500]
             ):
                 hit, p, r, mrr, rp, ndcg = compute_metrics(top_songs, relevant, k)
 
@@ -236,7 +236,7 @@ def main():
 
     save_csv(out10, results_10, 10)
     save_csv(out66, results_66, 66)
-    save_csv(out100, results_100, 100)
+    save_csv(out500, results_500, 500)
 
     print("Saved all 3 CSVs.")
 
