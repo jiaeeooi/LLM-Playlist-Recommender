@@ -96,22 +96,18 @@ def compute_metrics(recommended_songs, relevant_songs, top_n=66):
 
     R = len(G_T)
 
-    # HIT@N
     hits = sum(1 for s in recommended_songs[:top_n] if s in G_T)
     hit_score = hits / min(top_n, R) if R > 0 else 0.0
 
-    # Precision / Recall
     precision = hits / top_n if top_n > 0 else 0.0
     recall = hits / R if R > 0 else 0.0
 
-    # MRR
     mrr = 0.0
     for i, s in enumerate(recommended_songs[:top_n]):
         if s in G_T:
             mrr = 1 / (i + 1)
             break
 
-    # R-Precision (with artist bonus)
     top_r = recommended_songs[:R]
     S_T = set(top_r)
     S_A = set(a for _, a in top_r)
@@ -121,7 +117,6 @@ def compute_metrics(recommended_songs, relevant_songs, top_n=66):
 
     r_precision = (len(exact) + 0.25 * len(artist)) / R if R > 0 else 0.0
 
-    # NDCG
     rel = [1 if s in G_T else 0 for s in recommended_songs[:top_n]]
 
     def dcg(r):
@@ -158,7 +153,6 @@ def main():
         device="cuda"
     )
 
-    # Normalize ONCE
     all_embs = F.normalize(all_embs, dim=1)
 
     # ---------- Load tracks ----------
@@ -178,51 +172,60 @@ def main():
 
     # ---------- Encode ALL queries ----------
     query_embs = encode_batch(test_names, tokenizer, model)
-
-    # Normalize
     query_embs = F.normalize(query_embs, dim=1)
 
-    # ---------- ONE SHOT similarity ----------
-    sim_matrix = torch.matmul(query_embs, all_embs.T)
-
-    # ---------- TOP-K retrieval ----------
-    topk_vals, topk_idx = torch.topk(sim_matrix, k=50, dim=1)
+    # =========================
+    # CHUNKED SIMILARITY (KEY FIX)
+    # =========================
+    TOP_K = 50
+    QUERY_BATCH = 256
 
     results = []
 
-    # ---------- Evaluation loop ----------
-    for i in tqdm(range(len(test_names)), desc="Evaluating"):
+    for start in tqdm(range(0, query_embs.size(0), QUERY_BATCH), desc="Similarity batches"):
+        end = start + QUERY_BATCH
 
-        indices = topk_idx[i].cpu().numpy()
-        similar_pids = [pids[idx] for idx in indices]
+        q_batch = query_embs[start:end]
 
-        counter = Counter()
+        sim = torch.matmul(q_batch, all_embs.T)
 
-        for pid in similar_pids:
-            for track in playlist_tracks.get(str(pid), []):
-                counter[track] += 1
+        topk_vals, topk_idx = torch.topk(sim, k=TOP_K, dim=1)
 
-        top_songs = [song for song, _ in counter.most_common(66)]
+        topk_idx = topk_idx.cpu()
 
-        relevant = list(set(playlist_tracks.get(test_pids[i], [])))
+        for i in range(topk_idx.size(0)):
+            global_idx = start + i
 
-        hit, precision, recall, mrr, r_prec, ndcg = compute_metrics(
-            top_songs,
-            relevant,
-            top_n=66
-        )
+            indices = topk_idx[i].numpy()
+            similar_pids = [pids[idx] for idx in indices]
 
-        results.append({
-            "Cluster ID": cluster_ids[i],
-            "Playlist ID": test_pids[i],
-            "Playlist Title": test_names[i],
-            "HIT@66": hit,
-            "Precision@66": precision,
-            "Recall@66": recall,
-            "MRR@66": mrr,
-            "R-Precision": r_prec,
-            "NDCG@66": ndcg
-        })
+            counter = Counter()
+            for pid in similar_pids:
+                for track in playlist_tracks.get(str(pid), []):
+                    counter[track] += 1
+
+            top_songs = [song for song, _ in counter.most_common(66)]
+            relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
+
+            hit, precision, recall, mrr, r_prec, ndcg = compute_metrics(
+                top_songs, relevant, top_n=66
+            )
+
+            results.append({
+                "Cluster ID": cluster_ids[global_idx],
+                "Playlist ID": test_pids[global_idx],
+                "Playlist Title": test_names[global_idx],
+                "HIT@66": hit,
+                "Precision@66": precision,
+                "Recall@66": recall,
+                "MRR@66": mrr,
+                "R-Precision": r_prec,
+                "NDCG@66": ndcg
+            })
+
+        # free GPU memory
+        del sim, topk_vals, topk_idx
+        torch.cuda.empty_cache()
 
     # ---------- Save ----------
     fieldnames = [
