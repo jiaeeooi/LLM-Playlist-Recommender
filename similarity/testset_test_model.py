@@ -174,7 +174,7 @@ def main():
     query_embs = F.normalize(query_embs, dim=1)
 
     # ---------- Chunked similarity ----------
-    TOP_K = 50
+    TOP_K = 100
     QUERY_BATCH = 256
 
     results_10, results_66, results_100 = [], [], []
@@ -199,7 +199,7 @@ def main():
                     counter[track] += 1
 
             # IMPORTANT: compute top 100 ONCE
-            top_songs = [song for song, _ in counter.most_common(100)]
+            top_songs = [song for song, _ in counter.most_common(500)]
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
 
             for k, store in zip(
