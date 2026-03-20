@@ -91,6 +91,10 @@ def load_playlist_tracks(items_csv, tracks_csv):
 # METRICS
 # =========================
 def compute_metrics(recommended_songs, relevant_songs, top_n):
+    """
+    Compute all metrics including HIT@N, Precision@N, Recall@N, MRR@N, 
+    R-Precision (adjusted for top_n), and NDCG@N.
+    """
     G_T = set(relevant_songs)
     G_A = set(a for _, a in relevant_songs)
     R = len(G_T)
@@ -135,6 +139,9 @@ def main():
 
     model_dir = "/content/drive/MyDrive/playlist_project/models/cross_entropy_model"
     emb_file = "/content/drive/MyDrive/playlist_project/embeddings/playlists_embeddings_cross_entropy.pkl"
+    #model_dir = "sentence-transformers/all-MiniLM-L6-v2"
+    #emb_file = "/content/drive/MyDrive/playlist_project/embeddings/playlists_embeddings_pretrained.pkl"
+
     items_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/items.csv"
     tracks_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/tracks.csv"
     clusters_test_csv = "/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_test.csv"
@@ -142,6 +149,10 @@ def main():
     out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_10.csv"
     out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_66.csv"
     out500 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_500.csv"
+
+    #out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_10.csv"
+    #out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_66.csv"
+    #out500 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_500.csv"
 
     tokenizer, model = load_model(model_dir)
 
