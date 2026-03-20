@@ -174,7 +174,7 @@ def main():
     query_embs = F.normalize(query_embs, dim=1)
 
     # ---------- Chunked similarity ----------
-    TOP_K = 100
+    TOP_K = 200
     QUERY_BATCH = 256
 
     results_10, results_66, results_100 = [], [], []
