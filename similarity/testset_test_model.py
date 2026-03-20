@@ -93,35 +93,35 @@ def load_playlist_tracks(items_csv, tracks_csv):
 def compute_metrics(recommended_songs, relevant_songs, top_n):
     G_T = set(relevant_songs)
     G_A = set(a for _, a in relevant_songs)
-
     R = len(G_T)
 
+    # HIT@N
     hits = sum(1 for s in recommended_songs[:top_n] if s in G_T)
     hit_score = hits / min(top_n, R) if R > 0 else 0.0
 
+    # Precision & Recall
     precision = hits / top_n if top_n > 0 else 0.0
     recall = hits / R if R > 0 else 0.0
 
+    # MRR@N
     mrr = 0.0
     for i, s in enumerate(recommended_songs[:top_n]):
         if s in G_T:
             mrr = 1 / (i + 1)
             break
 
-    top_r = recommended_songs[:R]
+    # R-Precision adjusted: use min(R, top_n)
+    top_r = recommended_songs[:min(R, top_n)]
     S_T = set(top_r)
     S_A = set(a for _, a in top_r)
-
     exact = S_T & G_T
     artist = S_A & G_A
-
     r_precision = (len(exact) + 0.25 * len(artist)) / R if R > 0 else 0.0
 
+    # NDCG@N
     rel = [1 if s in G_T else 0 for s in recommended_songs[:top_n]]
-
     def dcg(r):
         return sum(v / math.log2(i + 2) for i, v in enumerate(r))
-
     idcg = dcg(sorted(rel, reverse=True))
     ndcg = dcg(rel) / idcg if idcg > 0 else 0.0
 
