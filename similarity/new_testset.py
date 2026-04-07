@@ -204,6 +204,7 @@ def main():
             indices = topk_idx[i].numpy()
             similar_pids = [pids[idx] for idx in indices]
 
+            '''
             counter = Counter()
             for pid in similar_pids:
                 for track in playlist_tracks.get(str(pid), []):
@@ -211,6 +212,30 @@ def main():
 
             top_songs = [song for song, _ in counter.most_common(500)]
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
+            '''
+
+            candidates = {}
+            for pid in similar_pids:
+                playlist_score = sim[i, pids.index(pid)].item()  # playlist-level cosine similarity
+                for track in playlist_tracks.get(str(pid), []):
+                    if track not in candidates:
+                        candidates[track] = {
+                            "playlist_score": playlist_score,  # similarity of playlist to query
+                            "frequency": 1                     # occurrence count
+                        } 
+                    else:
+                        # update frequency and optionally add playlist_score
+                        candidates[track]["frequency"] += 1
+                        candidates[track]["playlist_score"] = max(candidates[track]["playlist_score"], playlist_score)
+            
+            # normalize playlist_score and frequency between 0-1
+            max_score = max(c["playlist_score"] for c in candidates.values())
+            max_freq = max(c["frequency"] for c in candidates.values())
+
+            for c in candidates.values():
+                c["playlist_score_norm"] = c["playlist_score"] / max_score
+                c["frequency_norm"] = c["frequency"] / max_freq
+
 
             for k, store in zip(
                 [10, 66, 500],
