@@ -236,7 +236,7 @@ def main():
                 c["playlist_score_norm"] = c["playlist_score"] / max_score
                 c["frequency_norm"] = c["frequency"] / max_freq
 
-
+            ### needs changes 
             for k, store in zip(
                 [10, 66, 500],
                 [results_10, results_66, results_500]
