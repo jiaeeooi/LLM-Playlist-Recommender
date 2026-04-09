@@ -343,8 +343,11 @@ def main():
     # ---------- Chunked similarity ----------
     TOP_K = 50
     QUERY_BATCH = 256
+    top_n_list = [10, 66, 500]
 
-    results_10, results_66, results_500 = [], [], []
+    # Store all results per method
+    results_all = {method: {N: [] for N in top_n_list} 
+                   for method in ['original', 'combsum', 'combmnz', 'bordafuse', 'logisr', 'twra']}
 
     for start in tqdm(range(0, query_embs.size(0), QUERY_BATCH), desc="Similarity batches"):
         end = start + QUERY_BATCH
@@ -370,65 +373,96 @@ def main():
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
             '''
 
+            # ---------- Prepare track candidates ----------
             candidates = {}
-            for pid in similar_pids:
-                playlist_score = sim[i, pids.index(pid)].item()  # playlist-level cosine similarity
-                for track in playlist_tracks.get(str(pid), []):
-                    if track not in candidates:
-                        candidates[track] = {
-                            "playlist_score": playlist_score,  # similarity of playlist to query
-                            "frequency": 1                     # occurrence count
-                        } 
-                    else:
-                        # update frequency and optionally add playlist_score
-                        candidates[track]["frequency"] += 1
-                        candidates[track]["playlist_score"] = max(candidates[track]["playlist_score"], playlist_score)
-            
-            # normalize playlist_score and frequency between 0-1
-            max_score = max(c["playlist_score"] for c in candidates.values())
-            max_freq = max(c["frequency"] for c in candidates.values())
+            playlist_scores_norm = {}  # normalized similarity per playlist
+            playlist_rankings = []     # for BordaFuse
 
+            for pid in similar_pids:
+                score = sim[i, pids.index(pid)].item()
+                playlist_scores_norm[pid] = score
+                tracks = playlist_tracks.get(str(pid), [])
+                playlist_rankings.append([track for track, _ in tracks])
+                for track in tracks:
+                    if track not in candidates:
+                        candidates[track] = {"playlist_score": score, "frequency": 1}
+                    else:
+                        candidates[track]["frequency"] += 1
+                        candidates[track]["playlist_score"] = max(candidates[track]["playlist_score"], score)
+            
+            # normalize playlist_score and frequency 0-1
+            max_score = max(c["playlist_score"] for c in candidates.values()) or 1
+            max_freq = max(c["frequency"] for c in candidates.values()) or 1
             for c in candidates.values():
                 c["playlist_score_norm"] = c["playlist_score"] / max_score
                 c["frequency_norm"] = c["frequency"] / max_freq
 
-            ### needs changes 
-            for k, store in zip(
-                [10, 66, 500],
-                [results_10, results_66, results_500]
-            ):
-                hit, p, r, mrr, rp, ndcg = compute_metrics(top_songs, relevant, k)
+            # ---------- Original Top-K ----------
+            counter_orig = Counter()
+            for pid in similar_pids:
+                for track in playlist_tracks.get(str(pid), []):
+                    counter_orig[track] += 1
+            top_original = [t for t, _ in counter_orig.most_common(max(top_n_list))]
 
-                store.append({
-                    "Cluster ID": cluster_ids[global_idx],
-                    "Playlist ID": test_pids[global_idx],
-                    "Playlist Title": test_names[global_idx],
-                    f"HIT@{k}": hit,
-                    f"Precision@{k}": p,
-                    f"Recall@{k}": r,
-                    f"MRR@{k}": mrr,
-                    "R-Precision": rp,
-                    f"NDCG@{k}": ndcg
-                })
+             # ---------- CombSUM ----------
+            track_scores = [(track, c["playlist_score_norm"]) for track, c in candidates.items()]
+            agg_combsum = combsum(track_scores)
+            top_combsum = [t for t, _ in agg_combsum.most_common(max(top_n_list))]
+
+            # ---------- CombMNZ ----------
+            playlist_counts = {track: c["frequency"] for track, c in candidates.items()}
+            agg_combmnz = combmnz(track_scores, playlist_counts)
+            top_combmnz = [t for t, _ in agg_combmnz.most_common(max(top_n_list))]
+
+            # ---------- BordaFuse ----------
+            agg_borda = bordafuse(track_scores, playlist_rankings)
+            top_borda = [t for t, _ in agg_borda.most_common(max(top_n_list))]
+
+            # ---------- LogISR ----------
+            agg_logisr = logisr(track_scores)
+            top_logisr = [t for t, _ in agg_logisr.most_common(max(top_n_list))]
+
+            # ---------- TWRA ----------
+            top_twra = twra_rerank(track_scores, playlist_counts, lambda_val=0.5)
+
+            # ---------- Compute metrics ----------
+            relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
+            for N in top_n_list:
+                for method, top_songs in zip(
+                    ['original', 'combsum', 'combmnz', 'bordafuse', 'logisr', 'twra'],
+                    [top_original, top_combsum, top_combmnz, top_borda, top_logisr, top_twra]
+                ):
+                    topN = top_songs[:N]
+                    hit, p, r, mrr, rp, ndcg = compute_metrics(topN, relevant, N)
+                    results_all[method][N].append({
+                        "Cluster ID": cluster_ids[global_idx],
+                        "Playlist ID": test_pids[global_idx],
+                        "Playlist Title": test_names[global_idx],
+                        f"HIT@{N}": hit,
+                        f"Precision@{N}": p,
+                        f"Recall@{N}": r,
+                        f"MRR@{N}": mrr,
+                        "R-Precision": rp,
+                        f"NDCG@{N}": ndcg
+                    })
 
         del sim, topk_idx
         torch.cuda.empty_cache()
 
-    # ---------- Save function ----------
-    def save_csv(path, results, k):
-        fieldnames = [
-            "Cluster ID", "Playlist ID", "Playlist Title",
-            f"HIT@{k}", f"Precision@{k}", f"Recall@{k}",
-            f"MRR@{k}", "R-Precision", f"NDCG@{k}"
-        ]
-        with open(path, 'w', newline='', encoding='utf8') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(results)
+    # ---------- Save CSVs ----------
+    for N in top_n_list:
+        for method in results_all:
+            path = os.path.join(out_dir, f"{method}_{N}.csv")
+            fieldnames = [
+                "Cluster ID", "Playlist ID", "Playlist Title",
+                f"HIT@{N}", f"Precision@{N}", f"Recall@{N}",
+                f"MRR@{N}", "R-Precision", f"NDCG@{N}"
+            ]
+            with open(path, 'w', newline='', encoding='utf8') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(results_all[method][N])
 
-    save_csv(out10, results_10, 10)
-    save_csv(out66, results_66, 66)
-    save_csv(out500, results_500, 500)
 
     print("Saved all 3 CSVs.")
 
