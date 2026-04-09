@@ -158,13 +158,6 @@ def bordafuse(track_scores, playlist_rankings):
             counter[track] += (L - pos)
     return counter
 
-def isr(track_scores, playlist_counts):
-    """ISR: sum of normalized scores"""
-    counter = {}
-    for track, score in track_scores:
-        counter[track] = counter.get(track, 0) + score
-    return Counter(counter)
-
 def logisr(track_scores):
     """LogISR: dampen high scores using log"""
     counter = Counter()
@@ -178,7 +171,7 @@ def aggregate_tracks(similar_pids, playlist_tracks, playlist_scores_norm, top_n_
     Returns a dictionary: method -> top_n -> list of track lists per query
     """
     results_per_method = {k: {N: [] for N in top_n_list} 
-                          for k in ['combsum', 'combmnz', 'bordafuse', 'isr', 'logisr']}
+                          for k in ['combsum', 'combmnz', 'bordafuse', 'logisr']}
 
     for q_idx, top_pids in enumerate(tqdm(similar_pids, desc="Aggregating tracks per query")):
         # --- prepare track-level features ---
@@ -197,14 +190,12 @@ def aggregate_tracks(similar_pids, playlist_tracks, playlist_scores_norm, top_n_
         agg_combsum = combsum(track_scores)
         agg_combmnz = combmnz(track_scores, playlist_counts)
         agg_borda = bordafuse(track_scores, playlist_rankings)
-        agg_isr = isr(track_scores)
         agg_logisr = logisr(track_scores)
 
         # --- sort top tracks ---
         top_combsum = [t for t, _ in agg_combsum.most_common(max(top_n_list))]
         top_combmnz = [t for t, _ in agg_combmnz.most_common(max(top_n_list))]
         top_borda = [t for t, _ in agg_borda.most_common(max(top_n_list))]
-        top_isr = [t for t, _ in agg_isr.most_common(max(top_n_list))]
         top_logisr = [t for t, _ in agg_logisr.most_common(max(top_n_list))]
 
         # --- store top-N for each method ---
@@ -212,11 +203,88 @@ def aggregate_tracks(similar_pids, playlist_tracks, playlist_scores_norm, top_n_
             results_per_method['combsum'][N].append(top_combsum[:N])
             results_per_method['combmnz'][N].append(top_combmnz[:N])
             results_per_method['bordafuse'][N].append(top_borda[:N])
-            results_per_method['isr'][N].append(top_isr[:N])
             results_per_method['logisr'][N].append(top_logisr[:N])
 
     return results_per_method
 
+# =========================
+# TWRA RERANK FUNCTION
+# =========================
+def twra_rerank(f_rank_scores, playlist_counts, lambda_val=0.5):
+    """
+    Two-Way Ranking Aggregation (TWRA)
+    
+    Args:
+        f_rank_scores: list of tuples (track, score), higher score = more relevant
+        playlist_counts: dict {track: frequency across candidate playlists}
+        lambda_val: float between 0 and 1, weight of backward rank
+
+    Returns:
+        sorted_tracks: list of tracks sorted by ag-rank ascending
+    """
+    # 1. Compute f-rank: rank by descending f_rank_scores
+    f_sorted = sorted(f_rank_scores, key=lambda x: -x[1])
+    f_rank_dict = {track: rank for rank, (track, _) in enumerate(f_sorted, start=1)}
+
+    # 2. Compute b-rank: rank by descending frequency (higher freq = rank 1)
+    sorted_tracks_by_freq = sorted(playlist_counts.items(), key=lambda x: -x[1])
+    b_rank_dict = {track: rank for rank, (track, _) in enumerate(sorted_tracks_by_freq, start=1)}
+
+    # 3. Compute aggregated rank
+    ag_rank_dict = {}
+    for track, _ in f_rank_scores:
+        f_r = f_rank_dict.get(track, len(f_rank_scores)+1)
+        b_r = b_rank_dict.get(track, len(f_rank_scores)+1)
+        ag_rank_dict[track] = (1 - lambda_val) * f_r + lambda_val * b_r
+
+    # 4. Sort by aggregated rank ascending
+    sorted_tracks = sorted(ag_rank_dict, key=lambda t: ag_rank_dict[t])
+    return sorted_tracks
+
+# =========================
+# HAMMING DISTANCE DIVERSITY
+# =========================
+def hamming_distance_diversity(recommendations):
+    """
+    recommendations: list of lists, each sublist is top-L tracks for a playlist
+    returns: average pairwise Hamming distance (diversity)
+    """
+    n = len(recommendations)
+    L = len(recommendations[0])
+    total_hd = 0
+    count = 0
+
+    for i in range(n):
+        for j in range(i+1, n):
+            common = len(set(recommendations[i]) & set(recommendations[j]))
+            hd_ij = 1 - (common / L)
+            total_hd += hd_ij
+            count += 1
+
+    return total_hd / count if count > 0 else 0.0
+
+# =========================
+# GINI COEFFICIENT FOR COVERAGE
+# =========================
+def gini_coverage(recommendations):
+    """
+    recommendations: list of lists, each sublist is top-L tracks for a playlist
+    returns: Gini coefficient measuring imbalance in track recommendation frequency
+    """
+    track_counts = Counter()
+    for rec in recommendations:
+        for t in rec:
+            track_counts[t] += 1
+
+    freqs = np.array(sorted(track_counts.values()))  # ascending
+    n = len(freqs)
+    if n <= 1:
+        return 0.0
+
+    # compute Gini coefficient
+    cumulative = np.cumsum(freqs)
+    gini = 1 - (2 / (n - 1)) * np.sum((np.arange(1, n+1) - 1) * freqs / cumulative[-1])
+    return gini
 
 
 
