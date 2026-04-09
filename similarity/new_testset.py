@@ -463,8 +463,7 @@ def main():
                 writer.writeheader()
                 writer.writerows(results_all[method][N])
 
-
-    print("Saved all 3 CSVs.")
+    print("Saved all CSVs.")
 
 
 if __name__ == "__main__":
