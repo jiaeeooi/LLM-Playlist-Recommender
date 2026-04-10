@@ -292,9 +292,6 @@ def main():
     clusters_test_csv = "/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_test.csv"
 
     out_dir = "/content/drive/MyDrive/playlist_project/results/"
-    out_files = {10: "evaluation_cross_entropy_10.csv",
-                 66: "evaluation_cross_entropy_66.csv",
-                 500: "evaluation_cross_entropy_500.csv"}
                  
     #out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_10.csv"
     #out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_66.csv"
@@ -343,6 +340,11 @@ def main():
     # Store all results per method
     results_all = {method: {N: [] for N in top_n_list} 
                    for method in ['original', 'combsum', 'combmnz', 'bordafuse', 'logisr', 'twra']}
+    
+    recommendations_store = {
+        method: {N: [] for N in top_n_list}
+        for method in ['original', 'combsum', 'combmnz', 'bordafuse', 'logisr', 'twra']
+    }
 
     for start in tqdm(range(0, query_embs.size(0), QUERY_BATCH), desc="Similarity batches"):
         end = start + QUERY_BATCH
@@ -428,6 +430,7 @@ def main():
                     [top_original, top_combsum, top_combmnz, top_borda, top_logisr, top_twra]
                 ):
                     topN = top_songs[:N]
+                    recommendations_store[method][N].append(topN)
                     hit, p, r, mrr, rp, ndcg = compute_metrics(topN, relevant, N)
                     results_all[method][N].append({
                         "Cluster ID": cluster_ids[global_idx],
@@ -460,6 +463,15 @@ def main():
 
     print("Saved all CSVs.")
 
+    # ---------- Compute diversity ----------
+    for method in recommendations_store:
+        for N in top_n_list:
+            rec_lists = recommendations_store[method][N]
+
+            hd = hamming_distance_diversity(rec_lists)
+            gini = gini_coverage(rec_lists)
+
+            print(f"{method} @ {N}: Hamming Diversity = {hd:.4f}, Gini Coverage = {gini:.4f}")
 
 if __name__ == "__main__":
     main()
