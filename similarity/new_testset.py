@@ -208,38 +208,33 @@ def aggregate_tracks(similar_pids, playlist_tracks, playlist_scores_norm, top_n_
     return results_per_method
 
 # =========================
-# TWRA RERANK FUNCTION
+# TWRA FUNCTION
 # =========================
-def twra_rerank(f_rank_scores, playlist_counts, lambda_val=0.5):
+def twra_score(track_scores_twra, playlist_counts, lambda_val=0.5):
     """
-    Two-Way Ranking Aggregation (TWRA)
-    
-    Args:
-        f_rank_scores: list of tuples (track, score), higher score = more relevant
-        playlist_counts: dict {track: frequency across candidate playlists}
-        lambda_val: float between 0 and 1, weight of backward rank
+    f_t = average similarity per track
+    p_t = normalized frequency
 
-    Returns:
-        sorted_tracks: list of tracks sorted by ag-rank ascending
+    TWRA(t) = (1 - λ) * f_t + λ * log(1 + p_t)
     """
-    # 1. Compute f-rank: rank by descending f_rank_scores
-    f_sorted = sorted(f_rank_scores, key=lambda x: -x[1])
-    f_rank_dict = {track: rank for rank, (track, _) in enumerate(f_sorted, start=1)}
+    # ---------- relevance score (f_t already averaged) ----------
+    f_dict = dict(track_scores_twra)
 
-    # 2. Compute b-rank: rank by descending frequency (higher freq = rank 1)
-    sorted_tracks_by_freq = sorted(playlist_counts.items(), key=lambda x: -x[1])
-    b_rank_dict = {track: rank for rank, (track, _) in enumerate(sorted_tracks_by_freq, start=1)}
+    # ---------- normalize frequency ----------
+    max_freq = max(playlist_counts.values()) if playlist_counts else 1
 
-    # 3. Compute aggregated rank
-    ag_rank_dict = {}
-    for track, _ in f_rank_scores:
-        f_r = f_rank_dict.get(track, len(f_rank_scores)+1)
-        b_r = b_rank_dict.get(track, len(f_rank_scores)+1)
-        ag_rank_dict[track] = (1 - lambda_val) * f_r + lambda_val * b_r
+    scores = {}
 
-    # 4. Sort by aggregated rank ascending
-    sorted_tracks = sorted(ag_rank_dict, key=lambda t: ag_rank_dict[t])
-    return sorted_tracks
+    for track in f_dict:
+        f_t = f_dict[track]
+
+        p_t = playlist_counts.get(track, 0) / max_freq
+        p_t = math.log(1 + p_t)
+
+        scores[track] = (1 - lambda_val) * f_t + lambda_val * p_t
+
+    # sort by final score
+    return sorted(scores, key=scores.get, reverse=True)
 
 # =========================
 # HAMMING DISTANCE DIVERSITY
@@ -327,6 +322,8 @@ def main():
     )
     all_embs = F.normalize(all_embs, dim=1)
 
+    pid_to_idx = {pid: idx for idx, pid in enumerate(pids)}
+
     # ---------- Load tracks ----------
     playlist_tracks = load_playlist_tracks(items_csv, tracks_csv)
 
@@ -378,43 +375,43 @@ def main():
             '''
 
             # ---------- Prepare track candidates ----------
-            candidates = {}
-            playlist_scores_norm = {}  # normalized similarity per playlist
-            playlist_rankings = []     # for BordaFuse
+            track_scores = []              # (track, score) per occurrence
+            playlist_counts = Counter()    # frequency per track
+            playlist_rankings = []         # for BordaFuse
+
+            track_score_sum_twra = {}
+            track_score_count_twra = {}
 
             for pid in similar_pids:
-                score = sim[i, pids.index(pid)].item()
-                playlist_scores_norm[pid] = score
+                score = sim[i, pid_to_idx[pid]].item()
                 tracks = playlist_tracks.get(str(pid), [])
                 playlist_rankings.append([track for track, _ in tracks])
-                for track in tracks:
-                    if track not in candidates:
-                        candidates[track] = {"playlist_score": score, "frequency": 1}
+                for track, _ in tracks:
+                    track_scores.append((track, score))
+                    playlist_counts[track] += 1
+                    if track not in track_score_sum_twra:
+                        track_score_sum_twra[track] = score
+                        track_score_count_twra[track] = 1
                     else:
-                        candidates[track]["frequency"] += 1
-                        candidates[track]["playlist_score"] = max(candidates[track]["playlist_score"], score)
+                        track_score_sum_twra[track] += score
+                        track_score_count_twra[track] += 1
             
-            # normalize playlist_score and frequency 0-1
-            max_score = max(c["playlist_score"] for c in candidates.values()) or 1
-            max_freq = max(c["frequency"] for c in candidates.values()) or 1
-            for c in candidates.values():
-                c["playlist_score_norm"] = c["playlist_score"] / max_score
-                c["frequency_norm"] = c["frequency"] / max_freq
+            track_scores_twra = [
+                (track, track_score_sum_twra[track] / track_score_count_twra[track])
+                for track in track_score_sum_twra
+            ]
 
             # ---------- Original Top-K ----------
             counter_orig = Counter()
-            for pid in similar_pids:
-                for track in playlist_tracks.get(str(pid), []):
-                    counter_orig[track] += 1
+            for track, _ in track_scores:
+                counter_orig[track] += 1
             top_original = [t for t, _ in counter_orig.most_common(max(top_n_list))]
 
              # ---------- CombSUM ----------
-            track_scores = [(track, c["playlist_score_norm"]) for track, c in candidates.items()]
             agg_combsum = combsum(track_scores)
             top_combsum = [t for t, _ in agg_combsum.most_common(max(top_n_list))]
 
             # ---------- CombMNZ ----------
-            playlist_counts = {track: c["frequency"] for track, c in candidates.items()}
             agg_combmnz = combmnz(track_scores, playlist_counts)
             top_combmnz = [t for t, _ in agg_combmnz.most_common(max(top_n_list))]
 
@@ -427,7 +424,7 @@ def main():
             top_logisr = [t for t, _ in agg_logisr.most_common(max(top_n_list))]
 
             # ---------- TWRA ----------
-            top_twra = twra_rerank(track_scores, playlist_counts, lambda_val=0.5)
+            top_twra = twra_score(track_scores_twra, playlist_counts, lambda_val=0.5)
 
             # ---------- Compute metrics ----------
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
