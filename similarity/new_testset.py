@@ -211,12 +211,6 @@ def aggregate_tracks(similar_pids, playlist_tracks, playlist_scores_norm, top_n_
 # TWRA FUNCTION
 # =========================
 def twra_score(track_scores_twra, playlist_counts, lambda_val=0.5):
-    """
-    f_t = average similarity per track
-    p_t = normalized frequency
-
-    TWRA(t) = (1 - λ) * f_t + λ * log(1 + p_t)
-    """
     # ---------- relevance score (f_t already averaged) ----------
     f_dict = dict(track_scores_twra)
 
