@@ -291,7 +291,8 @@ def main():
     tracks_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/tracks.csv"
     clusters_test_csv = "/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_test.csv"
 
-    out_dir = "/content/drive/MyDrive/playlist_project/results/"
+    out_dir = "/content/drive/MyDrive/playlist_project/new_results/cross_entropy"
+    #out_dir = "/content/drive/MyDrive/playlist_project/new_results/pretrained"
                  
     #out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_10.csv"
     #out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_66.csv"
