@@ -233,24 +233,22 @@ def twra_score(track_scores_twra, playlist_counts, lambda_val=0.5):
 # =========================
 # HAMMING DISTANCE DIVERSITY
 # =========================
-def hamming_distance_diversity(recommendations):
+def hamming_distance_diversity(recommendations, sample_size=10000):
     """
     recommendations: list of lists, each sublist is top-L tracks for a playlist
     returns: average pairwise Hamming distance (diversity)
     """
     n = len(recommendations)
     L = len(recommendations[0])
+    rec_sets = [set(r) for r in recommendations]
     total_hd = 0
-    count = 0
 
-    for i in range(n):
-        for j in range(i+1, n):
-            common = len(set(recommendations[i]) & set(recommendations[j]))
-            hd_ij = 1 - (common / L)
-            total_hd += hd_ij
-            count += 1
+    for _ in range(sample_size):
+        i, j = random.sample(range(n), 2)
+        common = len(rec_sets[i] & rec_sets[j])
+        total_hd += 1 - (common / L)
 
-    return total_hd / count if count > 0 else 0.0
+    return total_hd / sample_size
 
 # =========================
 # GINI COEFFICIENT FOR COVERAGE
@@ -469,7 +467,7 @@ def main():
         for N in top_n_list:
             rec_lists = recommendations_store[method][N]
 
-            hd = hamming_distance_diversity(rec_lists)
+            hd = hamming_distance_diversity(rec_lists, sample_size=10000)
             gini = gini_coverage(rec_lists)
 
             print(f"{method} @ {N}: Hamming Diversity = {hd:.4f}, Gini Coverage = {gini:.4f}")
