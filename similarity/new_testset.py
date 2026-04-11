@@ -378,11 +378,6 @@ def main():
             track_score_sum_twra = {}
             track_score_count_twra = {}
 
-            #Testing
-            if global_idx == 0 and i == 0:
-              print("Sample pid from similar_pids:", similar_pids[0], type(similar_pids[0]))
-              print("Sample key from playlist_tracks:", next(iter(playlist_tracks.keys())), type(next(iter(playlist_tracks.keys()))))
-
             for pid in similar_pids:
                 score = sim[i, pid_to_idx[pid]].item()
                 tracks = playlist_tracks.get(str(pid), [])
@@ -407,13 +402,8 @@ def main():
             for track, _ in track_scores:
                 counter_orig[track] += 1
             top_original = [t for t, _ in counter_orig.most_common(max(top_n_list))]
-            
-            # Testing 
-            if global_idx == 0:
-                print("Top original recommendations (first query):")
-                print(top_original[:5])
 
-             # ---------- CombSUM ----------
+            # ---------- CombSUM ----------
             agg_combsum = combsum(track_scores)
             top_combsum = [t for t, _ in agg_combsum.most_common(max(top_n_list))]
 
