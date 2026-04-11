@@ -9,6 +9,7 @@ from tqdm import tqdm
 from collections import Counter
 from transformers import AutoTokenizer, AutoModel
 import itertools
+import random
 
 # =========================
 # LOAD MODEL
