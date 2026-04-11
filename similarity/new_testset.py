@@ -276,13 +276,6 @@ def main():
 
     out_dir = "/content/drive/MyDrive/playlist_project/new_results/cross_entropy"
     #out_dir = "/content/drive/MyDrive/playlist_project/new_results/pretrained"
-                 
-    #out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_10.csv"
-    #out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_66.csv"
-    #out500 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_500.csv"
-    #out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_10.csv"
-    #out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_66.csv"
-    #out500 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_500.csv"
 
     tokenizer, model = load_model(model_dir)
 
@@ -343,16 +336,6 @@ def main():
 
             indices = topk_idx[i].numpy()
             similar_pids = [pids[idx] for idx in indices]
-
-            '''
-            counter = Counter()
-            for pid in similar_pids:
-                for track in playlist_tracks.get(str(pid), []):
-                    counter[track] += 1
-
-            top_songs = [song for song, _ in counter.most_common(500)]
-            relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
-            '''
 
             # ---------- Prepare track candidates ----------
             track_scores = []              # (track, score) per occurrence
