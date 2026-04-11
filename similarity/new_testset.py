@@ -95,8 +95,9 @@ def compute_metrics(recommended_songs, relevant_songs, top_n):
     Compute all metrics including HIT@N, Precision@N, Recall@N, MRR@N, 
     R-Precision (adjusted for top_n), and NDCG@N.
     """
-    G_T = set(relevant_songs)
-    G_A = set(a for _, a in relevant_songs)
+    #G_T = set(relevant_songs)
+    G_T = set([t for t, _ in relevant_songs])
+    #G_A = set(a for _, a in relevant_songs)
     R = len(G_T)
 
     # HIT@N
@@ -117,10 +118,11 @@ def compute_metrics(recommended_songs, relevant_songs, top_n):
     # R-Precision adjusted: use min(R, top_n)
     top_r = recommended_songs[:min(R, top_n)]
     S_T = set(top_r)
-    S_A = set(a for _, a in top_r)
+    #S_A = set(a for _, a in top_r)
     exact = S_T & G_T
-    artist = S_A & G_A
-    r_precision = (len(exact) + 0.25 * len(artist)) / R if R > 0 else 0.0
+    #artist = S_A & G_A
+    #r_precision = (len(exact) + 0.25 * len(artist)) / R if R > 0 else 0.0
+    r_precision = len(exact) / R if R > 0 else 0.0
 
     # NDCG@N
     rel = [1 if s in G_T else 0 for s in recommended_songs[:top_n]]
