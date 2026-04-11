@@ -95,9 +95,8 @@ def compute_metrics(recommended_songs, relevant_songs, top_n):
     Compute all metrics including HIT@N, Precision@N, Recall@N, MRR@N, 
     R-Precision (adjusted for top_n), and NDCG@N.
     """
-    #G_T = set(relevant_songs)
-    G_T = set([t for t, _ in relevant_songs])
-    #G_A = set(a for _, a in relevant_songs)
+    G_T = set(relevant_songs)
+    G_A = set(a for _, a in relevant_songs)
     R = len(G_T)
 
     # HIT@N
@@ -118,11 +117,10 @@ def compute_metrics(recommended_songs, relevant_songs, top_n):
     # R-Precision adjusted: use min(R, top_n)
     top_r = recommended_songs[:min(R, top_n)]
     S_T = set(top_r)
-    #S_A = set(a for _, a in top_r)
+    S_A = set(a for _, a in top_r)
     exact = S_T & G_T
-    #artist = S_A & G_A
-    #r_precision = (len(exact) + 0.25 * len(artist)) / R if R > 0 else 0.0
-    r_precision = len(exact) / R if R > 0 else 0.0
+    artist = S_A & G_A
+    r_precision = (len(exact) + 0.25 * len(artist)) / R if R > 0 else 0.0
 
     # NDCG@N
     rel = [1 if s in G_T else 0 for s in recommended_songs[:top_n]]
@@ -132,7 +130,6 @@ def compute_metrics(recommended_songs, relevant_songs, top_n):
     ndcg = dcg(rel) / idcg if idcg > 0 else 0.0
 
     return hit_score, precision, recall, mrr, r_precision, ndcg
-
 
 # =========================
 # Aggregation Methods
@@ -184,9 +181,9 @@ def aggregate_tracks(similar_pids, playlist_tracks, playlist_scores_norm, top_n_
         for pid in top_pids:
             score = playlist_scores_norm[pid]  # normalized cosine similarity
             tracks = playlist_tracks.get(pid, [])
-            track_scores.extend([(track, score) for track, _ in tracks])
-            playlist_counts.update([track for track, _ in tracks])
-            playlist_rankings.append([track for track, _ in tracks])
+            track_scores.extend([(track, score) for track in tracks])
+            playlist_counts.update(tracks)
+            playlist_rankings.append(tracks)
 
         # --- aggregate tracks ---
         agg_combsum = combsum(track_scores)
@@ -384,8 +381,8 @@ def main():
             for pid in similar_pids:
                 score = sim[i, pid_to_idx[pid]].item()
                 tracks = playlist_tracks.get(str(pid), [])
-                playlist_rankings.append([track for track, _ in tracks])
-                for track, _ in tracks:
+                playlist_rankings.append(tracks)
+                for track in tracks:
                     track_scores.append((track, score))
                     playlist_counts[track] += 1
                     if track not in track_score_sum_twra:
