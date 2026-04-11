@@ -313,14 +313,20 @@ def main():
     TOP_K = 50
     QUERY_BATCH = 256
     top_n_list = [10, 66, 500]
+    lambda_list = [0.0, 0.25, 0.5, 0.75, 1.0]
 
     # Store all results per method
-    results_all = {method: {N: [] for N in top_n_list} 
-                   for method in ['original', 'combsum', 'combmnz', 'logisr', 'twra']}
-    
+    base_methods = ['original', 'combsum', 'combmnz', 'logisr']
+    twra_methods = [f"twra_{lam}" for lam in lambda_list]
+    all_methods = base_methods + twra_methods
+
+    results_all = {
+        method: {N: [] for N in top_n_list}
+        for method in all_methods
+    }
     recommendations_store = {
         method: {N: [] for N in top_n_list}
-        for method in ['original', 'combsum', 'combmnz', 'logisr', 'twra']
+        for method in all_methods
     }
 
     for start in tqdm(range(0, query_embs.size(0), QUERY_BATCH), desc="Similarity batches"):
@@ -381,15 +387,26 @@ def main():
             top_logisr = [t for t, _ in agg_logisr.most_common(max(top_n_list))]
 
             # ---------- TWRA ----------
-            top_twra = twra_score(track_scores_twra, playlist_counts, lambda_val=0.5)
+            top_twra_dict = {
+                lam: twra_score(track_scores_twra, playlist_counts, lambda_val=lam)
+                for lam in lambda_list
+            }
+
+            method_map = {
+                "original": top_original,
+                "combsum": top_combsum,
+                "combmnz": top_combmnz,
+                "logisr": top_logisr,
+            }
+
+            # add TWRA variants
+            for lam in lambda_list:
+                method_map[f"twra_{lam}"] = top_twra_dict[lam]
 
             # ---------- Compute metrics ----------
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
             for N in top_n_list:
-                for method, top_songs in zip(
-                    ['original', 'combsum', 'combmnz', 'logisr', 'twra'],
-                    [top_original, top_combsum, top_combmnz, top_logisr, top_twra]
-                ):
+                for method, top_songs in method_map.items():
                     topN = top_songs[:N]
                     recommendations_store[method][N].append(topN)
                     hit, p, r, mrr, rp, ndcg = compute_metrics(topN, relevant, N)
@@ -421,7 +438,6 @@ def main():
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(results_all[method][N])
-
     print("Saved all CSVs.")
 
     # ---------- Compute diversity ----------
