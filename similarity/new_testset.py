@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from collections import Counter
 from transformers import AutoTokenizer, AutoModel
-import itertools
 import random
 
 # =========================
@@ -149,15 +148,6 @@ def combmnz(track_scores, playlist_counts):
         counter[track] *= playlist_counts[track]
     return counter
 
-def bordafuse(track_scores, playlist_rankings):
-    """BordaFuse: points inversely proportional to rank"""
-    counter = Counter()
-    for ranking in playlist_rankings:
-        L = len(ranking)
-        for pos, track in enumerate(ranking):
-            counter[track] += (L - pos)
-    return counter
-
 def logisr(track_scores):
     """LogISR: dampen high scores using log"""
     counter = Counter()
@@ -171,38 +161,33 @@ def aggregate_tracks(similar_pids, playlist_tracks, playlist_scores_norm, top_n_
     Returns a dictionary: method -> top_n -> list of track lists per query
     """
     results_per_method = {k: {N: [] for N in top_n_list} 
-                          for k in ['combsum', 'combmnz', 'bordafuse', 'logisr']}
+                          for k in ['combsum', 'combmnz', 'logisr']}
 
     for q_idx, top_pids in enumerate(tqdm(similar_pids, desc="Aggregating tracks per query")):
         # --- prepare track-level features ---
         track_scores = []   # list of (track, score)
         playlist_counts = Counter()  # number of playlists a track appears in
-        playlist_rankings = []  # for BordaFuse
 
         for pid in top_pids:
             score = playlist_scores_norm[pid]  # normalized cosine similarity
             tracks = playlist_tracks.get(pid, [])
             track_scores.extend([(track, score) for track in tracks])
             playlist_counts.update(tracks)
-            playlist_rankings.append(tracks)
 
         # --- aggregate tracks ---
         agg_combsum = combsum(track_scores)
         agg_combmnz = combmnz(track_scores, playlist_counts)
-        agg_borda = bordafuse(track_scores, playlist_rankings)
         agg_logisr = logisr(track_scores)
 
         # --- sort top tracks ---
         top_combsum = [t for t, _ in agg_combsum.most_common(max(top_n_list))]
         top_combmnz = [t for t, _ in agg_combmnz.most_common(max(top_n_list))]
-        top_borda = [t for t, _ in agg_borda.most_common(max(top_n_list))]
         top_logisr = [t for t, _ in agg_logisr.most_common(max(top_n_list))]
 
         # --- store top-N for each method ---
         for N in top_n_list:
             results_per_method['combsum'][N].append(top_combsum[:N])
             results_per_method['combmnz'][N].append(top_combmnz[:N])
-            results_per_method['bordafuse'][N].append(top_borda[:N])
             results_per_method['logisr'][N].append(top_logisr[:N])
 
     return results_per_method
@@ -338,11 +323,11 @@ def main():
 
     # Store all results per method
     results_all = {method: {N: [] for N in top_n_list} 
-                   for method in ['original', 'combsum', 'combmnz', 'bordafuse', 'logisr', 'twra']}
+                   for method in ['original', 'combsum', 'combmnz', 'logisr', 'twra']}
     
     recommendations_store = {
         method: {N: [] for N in top_n_list}
-        for method in ['original', 'combsum', 'combmnz', 'bordafuse', 'logisr', 'twra']
+        for method in ['original', 'combsum', 'combmnz', 'logisr', 'twra']
     }
 
     for start in tqdm(range(0, query_embs.size(0), QUERY_BATCH), desc="Similarity batches"):
@@ -372,7 +357,6 @@ def main():
             # ---------- Prepare track candidates ----------
             track_scores = []              # (track, score) per occurrence
             playlist_counts = Counter()    # frequency per track
-            playlist_rankings = []         # for BordaFuse
 
             track_score_sum_twra = {}
             track_score_count_twra = {}
@@ -380,7 +364,6 @@ def main():
             for pid in similar_pids:
                 score = sim[i, pid_to_idx[pid]].item()
                 tracks = playlist_tracks.get(str(pid), [])
-                playlist_rankings.append(tracks)
                 for track in tracks:
                     track_scores.append((track, score))
                     playlist_counts[track] += 1
@@ -410,10 +393,6 @@ def main():
             agg_combmnz = combmnz(track_scores, playlist_counts)
             top_combmnz = [t for t, _ in agg_combmnz.most_common(max(top_n_list))]
 
-            # ---------- BordaFuse ----------
-            agg_borda = bordafuse(track_scores, playlist_rankings)
-            top_borda = [t for t, _ in agg_borda.most_common(max(top_n_list))]
-
             # ---------- LogISR ----------
             agg_logisr = logisr(track_scores)
             top_logisr = [t for t, _ in agg_logisr.most_common(max(top_n_list))]
@@ -425,8 +404,8 @@ def main():
             relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
             for N in top_n_list:
                 for method, top_songs in zip(
-                    ['original', 'combsum', 'combmnz', 'bordafuse', 'logisr', 'twra'],
-                    [top_original, top_combsum, top_combmnz, top_borda, top_logisr, top_twra]
+                    ['original', 'combsum', 'combmnz', 'logisr', 'twra'],
+                    [top_original, top_combsum, top_combmnz, top_logisr, top_twra]
                 ):
                     topN = top_songs[:N]
                     recommendations_store[method][N].append(topN)
