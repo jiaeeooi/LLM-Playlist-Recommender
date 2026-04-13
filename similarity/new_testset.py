@@ -239,10 +239,6 @@ def hamming_distance_diversity(recommendations, sample_size=10000):
 # GINI COEFFICIENT FOR COVERAGE
 # =========================
 def gini_coverage(recommendations):
-    """
-    recommendations: list of lists, each sublist is top-L tracks for a playlist
-    returns: Gini coefficient measuring imbalance in track recommendation frequency
-    """
     track_counts = Counter()
     for rec in recommendations:
         for t in rec:
@@ -253,12 +249,12 @@ def gini_coverage(recommendations):
     if n <= 1:
         return 0.0
 
-    # compute Gini coefficient
-    cumulative = np.cumsum(freqs)
-    gini = 1 - (2 / (n - 1)) * np.sum((np.arange(1, n+1) - 1) * freqs / cumulative[-1])
+    total = np.sum(freqs)
+    p = freqs / total  # normalize to probabilities
+    q = np.arange(1, n + 1)  # ranks
+    gini = 1 - (1 / (n - 1)) * np.sum((2 * q - n - 1) * p)
+
     return gini
-
-
 
 # =========================
 # MAIN
