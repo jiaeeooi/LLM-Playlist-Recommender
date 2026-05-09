@@ -9,243 +9,248 @@ from tqdm import tqdm
 from collections import Counter
 from transformers import AutoTokenizer, AutoModel
 
-# Load the model (choose model directory in the main)
-def load_fine_tuned_model(model_dir, base_model_name='sentence-transformers/all-MiniLM-L6-v2'):
+
+# =========================
+# LOAD MODEL
+# =========================
+def load_model(model_dir, base_model='sentence-transformers/all-MiniLM-L6-v2'):
     if not torch.cuda.is_available():
-        raise RuntimeError("No GPU detected.")
+        raise RuntimeError("GPU required")
+
     device = torch.device("cuda")
 
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
     model = AutoModel.from_pretrained(model_dir)
+
     model.eval()
     model.to(device)
 
     return tokenizer, model
 
-# Create the input playlist embedding
-def get_playlist_embedding(playlist_name, tokenizer, model):
-    device = next(model.parameters()).device # cuda
+
+# =========================
+# BATCH ENCODING
+# =========================
+def encode_batch(texts, tokenizer, model, batch_size=256):
+    device = next(model.parameters()).device
+    all_embs = []
+
     with torch.no_grad():
-        inputs = tokenizer(
-            playlist_name,
-            return_tensors='pt',
-            truncation=True,
-            padding=True
-        ).to(device)
-        outputs = model(**inputs)
-        last_hidden = outputs.last_hidden_state
-        embedding = last_hidden.mean(dim=1).squeeze()
+        for i in tqdm(range(0, len(texts), batch_size), desc="Encoding queries"):
+            batch = texts[i:i+batch_size]
 
-    # Go back to CPU to store it later
-    return embedding.cpu().numpy()
+            inputs = tokenizer(
+                batch,
+                return_tensors='pt',
+                truncation=True,
+                padding=True
+            ).to(device)
 
-def load_playlist_embeddings(embeddings_file):
-    # Load the precomputed playlists embeddings
-    with open(embeddings_file, 'rb') as f:
-        playlist_embeddings = pickle.load(f)
-    return playlist_embeddings
+            outputs = model(**inputs)
+            emb = outputs.last_hidden_state.mean(dim=1)
+
+            all_embs.append(emb)
+
+    return torch.cat(all_embs, dim=0)
 
 
-def load_playlist_tracks_with_artists(items_csv, tracks_csv):
-    # Link each song to their information (title and artist)
-    track_metadata = {}
+# =========================
+# LOAD DATA
+# =========================
+def load_playlist_embeddings(path):
+    with open(path, 'rb') as f:
+        return pickle.load(f)
+
+
+def load_playlist_tracks(items_csv, tracks_csv):
+    track_meta = {}
+
     with open(tracks_csv, 'r', encoding='utf8') as f:
         reader = csv.DictReader(f)
-        for row in tqdm(reader, desc="Loading track metadata", unit="track"):
-            track_uri = row["track_uri"]
-            track_metadata[track_uri] = {
-                "track_name": row["track_name"],
-                "artist_name": row["artist_name"],
-            }
+        for row in tqdm(reader, desc="Track metadata"):
+            track_meta[row["track_uri"]] = (
+                row["track_name"],
+                row["artist_name"]
+            )
 
     playlist_tracks = {}
+
     with open(items_csv, 'r', encoding='utf8') as f:
         reader = csv.DictReader(f)
-        for row in tqdm(reader, desc="Loading playlist tracks", unit="playlist"):
-            pid_str = row["pid"].strip()
-            track_uri = row["track_uri"]
+        for row in tqdm(reader, desc="Playlist tracks"):
+            pid = row["pid"].strip()
+            uri = row["track_uri"]
 
-            if pid_str not in playlist_tracks:
-                playlist_tracks[pid_str] = []
-            if track_uri in track_metadata:
-                playlist_tracks[pid_str].append(track_metadata[track_uri])
+            if uri in track_meta:
+                playlist_tracks.setdefault(pid, []).append(track_meta[uri])
 
     return playlist_tracks
 
-# Calculate cosine similarity scores and find the K closest playlists
-def find_similar_playlists_batch(playlist_name, playlist_embeddings, tokenizer, model, top_k=50):
-    device = next(model.parameters()).device  # cuda
 
-    query_emb_np = get_playlist_embedding(playlist_name, tokenizer, model)
-    query_emb_torch = torch.from_numpy(query_emb_np).unsqueeze(0).to(device)
-
-    pids = list(playlist_embeddings.keys())
-    all_embs_np = [playlist_embeddings[pid]["embedding"] for pid in pids]
-    all_embs_np = np.stack(all_embs_np, axis=0)
-    all_embs_torch = torch.from_numpy(all_embs_np).to(device)
-
-    cos_sims = F.cosine_similarity(query_emb_torch, all_embs_torch, dim=1)
-
-    # use cpu for the sort
-    cos_sims_np = cos_sims.cpu().numpy()
-    similarities = list(zip(pids, cos_sims_np))
-    # Sort and find k highest scores
-    similarities.sort(key=lambda x: x[1], reverse=True)
-
-    return similarities[:top_k]
-
-# Among the k closest cplaylists, find the most occuring ones
-def get_top_songs_with_artists(similar_playlists, playlist_tracks, top_k=10):
-    song_counter = Counter()
-    for pid, _ in similar_playlists:
-        pid_str = str(pid)
-        if pid_str in playlist_tracks:
-            for track_info in playlist_tracks[pid_str]:
-                pair = (track_info["track_name"], track_info["artist_name"])
-                song_counter[pair] += 1
-
-    return song_counter.most_common(top_k)
-
-def compute_metrics(recommended_songs, relevant_songs, top_n=10):
-    # Sets
+# =========================
+# METRICS
+# =========================
+def compute_metrics(recommended_songs, relevant_songs, top_n):
+    """
+    Compute all metrics including HIT@N, Precision@N, Recall@N, MRR@N, 
+    R-Precision (adjusted for top_n), and NDCG@N.
+    """
     G_T = set(relevant_songs)
-    G_A = set(artist for _, artist in relevant_songs)
-
+    G_A = set(a for _, a in relevant_songs)
     R = len(G_T)
-    top_r = recommended_songs[:R]
-    S_T = set(top_r)
-    S_A = set(artist for _, artist in top_r)
 
-    # R-Precision with artist bonus
-    exact_matches = S_T & G_T
-    matched_artists = S_A & G_A
-    track_score = len(exact_matches)
-    artist_score = len(matched_artists) * 0.25
-    r_precision = (track_score + artist_score) / R if R > 0 else 0.0
+    # HIT@N
+    hits = sum(1 for s in recommended_songs[:top_n] if s in G_T)
+    hit_score = hits / min(top_n, R) if R > 0 else 0.0
 
-    # HIT@N, Precision, Recall, MRR
-    hits = sum(1 for song in recommended_songs[:top_n] if song in G_T)
-    hit_score = hits / min(top_n, len(G_T)) if len(G_T) > 0 else 0.0
-    precision = hits / len(recommended_songs[:top_n]) if len(recommended_songs[:top_n]) > 0 else 0.0
-    recall = hits / len(G_T) if len(G_T) > 0 else 0.0
+    # Precision & Recall
+    precision = hits / top_n if top_n > 0 else 0.0
+    recall = hits / R if R > 0 else 0.0
 
+    # MRR@N
     mrr = 0.0
-    for i, song in enumerate(recommended_songs[:top_n]):
-        if song in G_T:
+    for i, s in enumerate(recommended_songs[:top_n]):
+        if s in G_T:
             mrr = 1 / (i + 1)
             break
 
-    # NDCG
-    relevance_list = [1 if song in G_T else 0 for song in recommended_songs[:top_n]]
+    # R-Precision adjusted: use min(R, top_n)
+    top_r = recommended_songs[:min(R, top_n)]
+    S_T = set(top_r)
+    S_A = set(a for _, a in top_r)
+    exact = S_T & G_T
+    artist = S_A & G_A
+    r_precision = (len(exact) + 0.25 * len(artist)) / R if R > 0 else 0.0
 
-    def dcg(rel):
-        return sum(rel_i / math.log2(idx + 2) for idx, rel_i in enumerate(rel))
+    # NDCG@N
+    rel = [1 if s in G_T else 0 for s in recommended_songs[:top_n]]
+    def dcg(r):
+        return sum(v / math.log2(i + 2) for i, v in enumerate(r))
+    idcg = dcg(sorted(rel, reverse=True))
+    ndcg = dcg(rel) / idcg if idcg > 0 else 0.0
 
-    dcg_val = dcg(relevance_list)
-    ideal_rel = sorted(relevance_list, reverse=True)
-    idcg_val = dcg(ideal_rel)
-    ndcg = dcg_val / idcg_val if idcg_val > 0 else 0.0
+    return hit_score, precision, recall, mrr, r_precision, ndcg
 
-    return {
-        "HIT@N": hit_score,
-        "Precision@N": precision,
-        "Recall@N": recall,
-        "MRR@N": mrr,
-        "R-Precision": r_precision,
-        "NDCG": ndcg
-    }
 
-########
-# Main #
-########
+# =========================
+# MAIN
+# =========================
 def main():
-    
-    # Choose the model directory
-    model_dir = "/home/vellard/playlist_continuation/fine_tuned_model_no_scheduler_2"
-    
-    playlist_embeddings_file = "/home/vellard/playlist_continuation/playlists_embeddings/final_embeddings/playlists_embeddings_scheduler.pkl"
-    items_csv = "/data/csvs/items.csv"
-    tracks_csv = "/data/csvs/tracks.csv"
-    playlists_csv = "/data/csvs/playlists.csv"
-    clusters_test_csv = "/home/vellard/playlist_continuation/clusters/clusters_test.csv"
 
-    results_csv = "evaluation_results_scheduler.csv"
+    model_dir = "/content/drive/MyDrive/playlist_project/models/cross_entropy_model"
+    emb_file = "/content/drive/MyDrive/playlist_project/embeddings/playlists_embeddings_cross_entropy.pkl"
+    #model_dir = "sentence-transformers/all-MiniLM-L6-v2"
+    #emb_file = "/content/drive/MyDrive/playlist_project/embeddings/playlists_embeddings_pretrained.pkl"
 
-    # Load models and playlists
-    tokenizer, model = load_fine_tuned_model(model_dir)
-    print("Loaded the model.")
+    items_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/items.csv"
+    tracks_csv = "/content/drive/MyDrive/playlist_project/playlist_continuation_data/csvs/tracks.csv"
+    clusters_test_csv = "/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_test.csv"
 
-    playlist_embeddings = load_playlist_embeddings(playlist_embeddings_file)
-    print("Loaded the playlists.")
+    out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_10.csv"
+    out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_66.csv"
+    out500 = "/content/drive/MyDrive/playlist_project/results/evaluation_cross_entropy_500.csv"
 
-    playlist_tracks = load_playlist_tracks_with_artists(items_csv, tracks_csv)
-    print("Loaded the tracks.")
+    #out10 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_10.csv"
+    #out66 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_66.csv"
+    #out500 = "/content/drive/MyDrive/playlist_project/results/evaluation_pretrained_500.csv"
 
-    playlist_titles = {}
-    with open(playlists_csv, 'r', encoding='utf8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            pid_str = row["pid"].strip()
-            playlist_titles[pid_str] = row["name"]
+    tokenizer, model = load_model(model_dir)
 
-    # Batch evaluation
-    all_results = []
+    # ---------- Load embeddings ----------
+    playlist_embeddings = load_playlist_embeddings(emb_file)
+
+    pids = list(playlist_embeddings.keys())
+    all_embs = torch.tensor(
+        np.stack([playlist_embeddings[pid]["embedding"] for pid in pids]),
+        dtype=torch.float32,
+        device="cuda"
+    )
+    all_embs = F.normalize(all_embs, dim=1)
+
+    # ---------- Load tracks ----------
+    playlist_tracks = load_playlist_tracks(items_csv, tracks_csv)
+
+    # ---------- Load test data ----------
+    test_names, test_pids, cluster_ids = [], [], []
 
     with open(clusters_test_csv, 'r', encoding='utf8') as f:
         reader = csv.DictReader(f)
-        for row in tqdm(reader, desc="Evaluating test playlists", unit="playlist"):
-            cluster_id = row["Cluster ID"]
-            test_pid = row["Playlist ID"].strip()
-            playlist_name = row["Playlist Title"].strip()
+        for row in reader:
+            test_names.append(row["Playlist Title"].strip())
+            test_pids.append(row["Playlist ID"].strip())
+            cluster_ids.append(row["Cluster ID"])
 
-            top_playlists = find_similar_playlists_batch(
-                playlist_name,
-                playlist_embeddings,
-                tokenizer,
-                model,
-                top_k=50
-            )
+    # ---------- Encode queries ----------
+    query_embs = encode_batch(test_names, tokenizer, model)
+    query_embs = F.normalize(query_embs, dim=1)
 
-            top_songs = get_top_songs_with_artists(
-                top_playlists,
-                playlist_tracks,
-                top_k=66
-            )
+    # ---------- Chunked similarity ----------
+    TOP_K = 50
+    QUERY_BATCH = 256
 
-            relevant_songs_info = playlist_tracks.get(test_pid, [])
-            relevant_songs = list({
-                (trk["track_name"], trk["artist_name"]) for trk in relevant_songs_info
-            })
+    results_10, results_66, results_500 = [], [], []
 
-            recommended_songs = [song_artist for song_artist, _ in top_songs]
-            metrics = compute_metrics(recommended_songs, relevant_songs, top_n=66)
+    for start in tqdm(range(0, query_embs.size(0), QUERY_BATCH), desc="Similarity batches"):
+        end = start + QUERY_BATCH
+        q_batch = query_embs[start:end]
 
-            result_row = {
-                "Cluster ID": cluster_id,
-                "Playlist ID": test_pid,
-                "Playlist Title": playlist_name,
-                "HIT@66": metrics["HIT@N"],
-                "Precision@66": metrics["Precision@N"],
-                "Recall@66": metrics["Recall@N"],
-                "MRR@66": metrics["MRR@N"],
-                "R-Precision": metrics["R-Precision"],
-                "NDCG@66": metrics["NDCG"]
-            }
-            all_results.append(result_row)
+        sim = torch.matmul(q_batch, all_embs.T)
+        _, topk_idx = torch.topk(sim, k=TOP_K, dim=1)
+        topk_idx = topk_idx.cpu()
 
-    # Save each result in a csv file
-    fieldnames = [
-        "Cluster ID", "Playlist ID", "Playlist Title",
-        "HIT@66", "Precision@66", "Recall@66", "MRR@66",
-        "R-Precision", "NDCG@66"
-    ]
-    with open(results_csv, 'w', encoding='utf8', newline='') as out_f:
-        writer = csv.DictWriter(out_f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in all_results:
-            writer.writerow(row)
+        for i in range(topk_idx.size(0)):
+            global_idx = start + i
 
-    print(f"\nResults saved in '{results_csv}'.")
+            indices = topk_idx[i].numpy()
+            similar_pids = [pids[idx] for idx in indices]
+
+            counter = Counter()
+            for pid in similar_pids:
+                for track in playlist_tracks.get(str(pid), []):
+                    counter[track] += 1
+
+            top_songs = [song for song, _ in counter.most_common(500)]
+            relevant = list(set(playlist_tracks.get(test_pids[global_idx], [])))
+
+            for k, store in zip(
+                [10, 66, 500],
+                [results_10, results_66, results_500]
+            ):
+                hit, p, r, mrr, rp, ndcg = compute_metrics(top_songs, relevant, k)
+
+                store.append({
+                    "Cluster ID": cluster_ids[global_idx],
+                    "Playlist ID": test_pids[global_idx],
+                    "Playlist Title": test_names[global_idx],
+                    f"HIT@{k}": hit,
+                    f"Precision@{k}": p,
+                    f"Recall@{k}": r,
+                    f"MRR@{k}": mrr,
+                    "R-Precision": rp,
+                    f"NDCG@{k}": ndcg
+                })
+
+        del sim, topk_idx
+        torch.cuda.empty_cache()
+
+    # ---------- Save function ----------
+    def save_csv(path, results, k):
+        fieldnames = [
+            "Cluster ID", "Playlist ID", "Playlist Title",
+            f"HIT@{k}", f"Precision@{k}", f"Recall@{k}",
+            f"MRR@{k}", "R-Precision", f"NDCG@{k}"
+        ]
+        with open(path, 'w', newline='', encoding='utf8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(results)
+
+    save_csv(out10, results_10, 10)
+    save_csv(out66, results_66, 66)
+    save_csv(out500, results_500, 500)
+
+    print("Saved all 3 CSVs.")
+
 
 if __name__ == "__main__":
     main()

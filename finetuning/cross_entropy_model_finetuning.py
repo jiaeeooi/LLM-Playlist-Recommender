@@ -6,11 +6,13 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trai
 
 # Parameters
 MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
-train_csv = '/home/vellard/playlist_continuation/clusters_train.csv'
-val_csv = '/home/vellard/playlist_continuation/clusters_val.csv'
-output_dir = './fine_tuned_model_no_scheduler_2'
-batch_size = 8
-epochs = 100
+train_csv = '/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_train.csv'
+val_csv = '/content/drive/MyDrive/playlist_project/clustering-no-split/split/represented/clusters_val.csv'
+output_dir = '/content/drive/MyDrive/playlist_project/models/cross_entropy_model'
+#batch_size = 8
+batch_size = 16
+#epochs = 100
+epochs = 5
 learning_rate = 2e-5
 warmup_steps = 100
 
@@ -57,7 +59,7 @@ training_args = TrainingArguments(
     num_train_epochs=epochs,
     per_device_train_batch_size=batch_size,
     per_device_eval_batch_size=batch_size,
-    evaluation_strategy="epoch",
+    eval_strategy="epoch",
     save_strategy="epoch",
     learning_rate=learning_rate,
     weight_decay=0.01,
